@@ -1,0 +1,192 @@
+
+%% Task 2 - Load Speech and Harmonics
+
+[s, fs_recorded] = audioread('Female16K.wav');
+
+fprintf('Recorded sampling frequency: %d Hz\n', fs_recorded);
+
+assert(fs_recorded == fs, ...
+    'The recording must have a sampling frequency of 16 kHz.');
+
+% Convert stereo to mono if necessary
+if size(s, 2) > 1
+    s = mean(s, 2);
+end
+
+f0 = 205;
+duration = 1;  % seconds
+
+t = (0:round(duration*fs)-1)' / fs;
+
+% s = sin(2*pi*f0*t);
+
+% soundsc(s, fs);
+
+% load harmonic filter mapping
+harmonics = readmatrix('Harmonics_of_filters.csv');
+
+% remove any non-numeric/header rows
+harmonics = harmonics(all(isfinite(harmonics(:, 1:5)), 2), :);
+
+fundamental_freqs = harmonics(:, 1);
+fundamental_filters = harmonics(:, 2);
+harmonic_filters = harmonics(:, 2:5);
+
+
+%% Task 2 - Split Speech Into Frames
+
+frame_size = 320;
+num_frames = floor(length(s) / frame_size);
+
+% choose frame to inspect
+frame_num = 20;
+
+start_sample = (frame_num-1)*frame_size + 1;
+end_sample = frame_num*frame_size;
+
+frame = s(start_sample:end_sample);
+
+% final sample of every 20 ms frame
+frame_ends = (1:num_frames)*frame_size;
+
+
+%% Task 2 - Run Entire Speech Through Filter Bank
+
+N = length(s);
+
+displacement = zeros(N, n);
+pressure = zeros(N, n);
+
+y = s;
+
+for i = 1:n
+    b = coeff(i, Gz_idx) * [1, -coeff(i, a1_idx), coeff(i, a2_idx)];
+    a = [1, -coeff(i, b1_idx), coeff(i, b2_idx)];
+
+    y = filter(coeff(i, Gp_idx), a, y);
+    displacement(:, i) = y;
+
+    y = filter(b, 1, y);
+    pressure(:, i) = y;
+end
+
+
+%% Task 2 - Spatial Differentiation
+
+spatial_diff1 = displacement(:, 1:end-1) - displacement(:, 2:end);
+spatial_diff2 = spatial_diff1(:, 1:end-1) - spatial_diff1(:, 2:end);
+
+% spatial difference at the end of every frame
+spatial_frames = spatial_diff2(frame_ends, :);
+
+
+%% Task 2 - Inner Hair Cell
+
+fc = 30;
+c_0 = exp(-2*pi*fc/fs);
+
+% half-wave rectification
+e_matrix = max(spatial_diff2, 0);
+
+% low-pass filtering
+energy = filter(1-c_0, [1, -c_0], e_matrix);
+
+% read the analyser at the end of each frame
+energy_frames = energy(frame_ends, :);
+
+
+%% Task 2 - Calculate HPS for Every Frame
+
+hps_all = zeros(num_frames, length(fundamental_filters));
+pitch = NaN(num_frames, 1);
+peak_filters = NaN(num_frames, 1);
+
+for frame_idx = 1:num_frames
+
+    energy_frame = energy_frames(frame_idx, :);
+
+    hps = prod(energy_frame(harmonic_filters), 2);
+
+    hps_all(frame_idx, :) = hps';
+
+    % peak picking
+    [~, peak_idx] = max(hps);
+
+    peak_filters(frame_idx) = fundamental_filters(peak_idx);
+    pitch(frame_idx) = fundamental_freqs(peak_idx);
+end
+
+%% Figure 2 - Entire Speech and Pitch Estimation
+
+figure;
+
+% entire speech waveform
+subplot(2, 1, 1);
+
+t = (0:length(s)-1) / fs;
+
+plot(t, s);
+grid on;
+
+xlabel('Time (s)');
+ylabel('Amplitude');
+title('Speech Waveform - We Were Away');
+
+
+% fundamental frequency for each frame
+subplot(2, 1, 2);
+
+plot(1:num_frames, pitch, '-o');
+grid on;
+
+xlabel('Frame Number');
+ylabel('Pitch Frequency (Hz)');
+title('Fundamental Frequency Estimated Using HPS');
+
+ylim([80, 420]);
+
+
+
+%% Figure 1 - Single Frame, Hair Cell Output and HPS
+
+figure;
+
+% speech waveform
+subplot(3, 1, 1);
+plot(1:frame_size, frame);
+grid on;
+
+xlabel('Samples');
+ylabel('Amplitude');
+title(sprintf('Speech Waveform (Frame no. %d)', frame_num));
+
+
+% hair cell output
+subplot(3, 1, 2);
+plot(1:size(energy_frames, 2), energy_frames(frame_num, :));
+grid on;
+
+xlabel('Filter Number');
+ylabel('Hair Cell Output');
+title(sprintf('Hair Cell Output (Frame no. %d)', frame_num));
+
+
+% harmonic product spectrum
+subplot(3, 1, 3);
+plot(fundamental_filters, hps_all(frame_num, :));
+grid on;
+hold on;
+
+% mark highest peak
+[peak_value, peak_idx] = max(hps_all(frame_num, :));
+
+peak_filter = fundamental_filters(peak_idx);
+peak_freq = fundamental_freqs(peak_idx);
+
+plot(peak_filter, peak_value, 'ro', 'MarkerSize', 8);
+xline(280, '--k');
+xline(422, '--k');
+
+xlabel('Filter Number');
+ylabel('HPS');
+title(sprintf('Harmonic Product Spectrum (Frame no. %d)', frame_num));

@@ -1,0 +1,19 @@
+% this is the script for the higher level stuff:
+
+time_domain_sim
+
+v_matrix = zeros(N, n);
+
+
+fc = 30000; % rate at which the switch is closed
+
+% we go across and apply the same func for each row:
+for i = 1:N
+
+    if i == 1
+        continue;
+    end
+
+    c_0 = exp(-2 * pi * fc / fs);
+    v_matrix = (1 - c_0) * e_matrix()
+end
